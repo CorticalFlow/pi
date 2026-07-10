@@ -10,7 +10,12 @@ import type {
 import { estimateContextTokens } from "../utils/estimate.ts";
 
 const CONTEXT_SAFETY_TOKENS = 4096;
-const MIN_MAX_TOKENS = 1;
+// Floor high enough to stay useful: a 1-token floor turns estimator drift (context
+// estimates are chars-based and can overshoot) into degenerate one-character answers
+// and tool calls cut mid-write. If the context is genuinely full, a 2048-token request
+// either completes the turn or surfaces a real overflow that the compact-and-retry
+// path can recover from — strictly better than silently emitting a single token.
+const MIN_MAX_TOKENS = 2048;
 
 export function clampMaxTokensToContext(model: Model<Api>, context: Context, maxTokens: number): number {
 	if (model.contextWindow <= 0) return Math.max(MIN_MAX_TOKENS, maxTokens);
