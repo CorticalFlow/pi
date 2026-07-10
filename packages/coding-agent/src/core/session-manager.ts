@@ -386,9 +386,31 @@ export function buildSessionContext(
 	// 3. Emit messages after compaction
 	const messages: AgentMessage[] = [];
 
-	const appendMessage = (entry: SessionEntry) => {
+	// Kept pre-compaction assistant messages carry usage from the old (larger) context.
+	// Token estimators anchor on the last usage-bearing assistant message
+	// (estimateContextTokens), so a stale totalTokens makes the per-request output clamp
+	// (clampMaxTokensToContext) collapse to its 1-token floor right after compaction —
+	// every follow-up request dies with a degenerate "length" stop. Zero the usage on
+	// kept messages so estimators fall back to a content-based estimate of what is
+	// actually in context; the first post-compaction assistant reply restores a real anchor.
+	const neutralizeUsage = (message: AgentMessage): AgentMessage => {
+		if (message.role !== "assistant") return message;
+		return {
+			...message,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+	};
+
+	const appendMessage = (entry: SessionEntry, keptBeforeCompaction = false) => {
 		if (entry.type === "message") {
-			messages.push(entry.message);
+			messages.push(keptBeforeCompaction ? neutralizeUsage(entry.message) : entry.message);
 		} else if (entry.type === "custom_message") {
 			messages.push(
 				createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp),
@@ -413,7 +435,7 @@ export function buildSessionContext(
 				foundFirstKept = true;
 			}
 			if (foundFirstKept) {
-				appendMessage(entry);
+				appendMessage(entry, true);
 			}
 		}
 
