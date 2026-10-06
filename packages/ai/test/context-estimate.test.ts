@@ -80,3 +80,25 @@ describe("context token estimation", () => {
 		});
 	});
 });
+
+describe("max tokens clamping near the context window", () => {
+	it("keeps near-window requests useful instead of degrading to one token", () => {
+		// Live usage says 9,500 of 10,000 tokens are used: available (10,000 - 9,500 - 4,096)
+		// is negative. A 1-token floor would produce a degenerate single-character response;
+		// the floor must keep the request large enough to complete a turn or surface a real
+		// provider-side overflow that compact-and-retry can recover from.
+		const context = normalizeContext({
+			messages: [{ role: "user", content: "prompt", timestamp: 100 }, createAssistant(200, 9_500)],
+		});
+
+		expect(buildBaseOptions(model, context).maxTokens).toBe(2_048);
+	});
+
+	it("does not raise an explicit caller cap below the floor", () => {
+		const context = normalizeContext({
+			messages: [{ role: "user", content: "prompt", timestamp: 100 }],
+		});
+
+		expect(buildBaseOptions(model, context, { maxTokens: 100 }).maxTokens).toBe(100);
+	});
+});
